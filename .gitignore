@@ -1,0 +1,11 @@
+# Python build artifacts
+__pycache__/
+
+# Environment directories
+.env
+venv/
+ENV/
+env/
+.venv/
+
+uv.lock
