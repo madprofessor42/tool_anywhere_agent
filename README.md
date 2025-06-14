@@ -4,7 +4,7 @@ A production-ready LangGraph agent that enables tool calling for any LLM, regard
 
 ## Overview
 
-Tool Anywhere Agent provides a clean, efficient way to add tool calling capabilities to any language model accessible through LangChain's `ChatOpenAI` interface. Built on LangGraph's agent architecture, it integrates seamlessly into existing workflows while maintaining optimal performance.
+Tool Anywhere Agent provides a clean, efficient way to add tool calling capabilities to any language model. Built on LangGraph's agent architecture, it integrates seamlessly into existing workflows while maintaining optimal performance.
 
 ## Key Features
 
@@ -15,6 +15,10 @@ Tool Anywhere Agent provides a clean, efficient way to add tool calling capabili
 **Efficient Request Pattern**: Uses a direct model→route→tools flow instead of multi-step planning, reducing LLM API calls.
 
 **Smart State Management**: Automatically tracks completed tool calls to prevent redundant operations.
+
+**Custom System Role**: You can specify a custom system role to control the agent's behavior and persona by passing.
+
+**Custom Output Parser**: You can define and use your own Pydantic output parser for structured responses.
 
 **Zero Configuration**: Works out of the box with any LangChain tools and models.
 
