@@ -74,6 +74,7 @@ config = {
 }
 
 examples = [
+    "HELLO",
     "What is 15 * 8 + 42?",
     "How many characters are in the word 'hello world'?",
     "Count the words in: 'The quick brown fox jumps over the lazy dog'",
@@ -93,9 +94,8 @@ for i, query in enumerate(examples, 1):
             {"messages": [{"role": "user", "content": query}]}, config
         )
 
-        # Get the last message from the agent
-        last_message = response["messages"][-1]
-        print(f"Agent: {last_message.content}")
+        for message in response["messages"]:
+            message.pretty_print()
 
     except Exception as e:
         print(f"Error: {e}")

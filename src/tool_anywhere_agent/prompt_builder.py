@@ -22,64 +22,59 @@ class ToolDefinition(TypedDict):
 def get_completed_tool_calls(messages: Sequence[BaseMessage]) -> str:
     """
     Analyze message history to find completed tool calls and their results.
-
+    
     Args:
         messages: List of messages in the conversation
-
+        
     Returns:
         str: Formatted string with completed tool call results
     """
     completed_calls = []
-
+    
     # Create a mapping of tool call IDs to their results
     tool_results = {}
-
+    
     # First pass: collect all tool results
     for message in messages:
         if isinstance(message, ToolMessage):
             tool_results[message.tool_call_id] = {
-                "name": message.name if hasattr(message, "name") else "unknown",
-                "content": message.content,
+                "name": message.name if hasattr(message, 'name') else "unknown",
+                "content": message.content
             }
-
+    
     # Second pass: find AI messages with tool calls and match them with results
     for message in messages:
-        if (
-            isinstance(message, AIMessage)
-            and hasattr(message, "tool_calls")
-            and message.tool_calls
-        ):
+        if isinstance(message, AIMessage) and hasattr(message, 'tool_calls') and message.tool_calls:
             for tool_call in message.tool_calls:
-                tool_call_id = tool_call.get("id")
+                tool_call_id = tool_call.get('id')
                 if tool_call_id and tool_call_id in tool_results:
                     result_info = tool_results[tool_call_id]
-                    completed_calls.append(
-                        {
-                            "tool_name": tool_call.get("name"),
-                            "args": tool_call.get("args", {}),
-                            "result": result_info["content"],
-                        }
-                    )
-
+                    completed_calls.append({
+                        'tool_name': tool_call.get('name'),
+                        'args': tool_call.get('args', {}),
+                        'result': result_info['content']
+                    })
+    
     if not completed_calls:
         return ""
-
+    
     # Format completed tool calls for the prompt
     completed_section = "The following tools have already been called with these exact arguments. DO NOT call them again with the same arguments:\n\n"
-
+    
     for i, call in enumerate(completed_calls, 1):
         completed_section += f"{i}. Tool: {call['tool_name']}\n"
         completed_section += f"   Arguments: {call['args']}\n"
         completed_section += f"   Result: {call['result']}\n\n"
-
+    
     completed_section += "If you need the result of any of these previous tool calls, use the result shown above instead of calling the tool again.\n\n"
-
+    
     return completed_section
 
 
 def create_system_message(
     tools: list[ToolDefinition] = None,
     messages: Sequence[BaseMessage] = None,
+    parser: PydanticOutputParser = None
 ) -> str:
     """
     Create a system message with tool instructions and JSON schema.
@@ -95,8 +90,8 @@ def create_system_message(
     class ToolCall(BaseModel):
         tool: str = Field(..., description="Name of the tool to call")
         args: dict = Field(..., description="Arguments to pass to the tool")
-
-    parser = PydanticOutputParser(pydantic_object=ToolCall)
+    
+    tool_call_parser = PydanticOutputParser(pydantic_object=ToolCall)
 
     # Get completed tool calls information
     completed_tools_info = ""
@@ -156,11 +151,14 @@ def create_system_message(
         f"2. Do not try to solve problems manually if a tool exists for that purpose. "
         f"3. You must use 1 tool at a time. "
         f"4. NEVER call the same tool with the same arguments if it has already been completed (see above). "
-        f"5. Do not mention to user anything about tool calling, just answer the question.\n\n"
+        f"5. If the user's question doesn't require any tool, answer directly in plain text with no JSON and do not invoke a tool at all. "
+        f"6. Do not mention to user anything about tool calling, just answer the question.\n\n"
         
-        f"Output ONLY a JSON object (with no extra text) that adheres EXACTLY to the following schema:\n\n"
+        f"If there were tool calls, output ONLY a JSON object (with no extra text) that adheres EXACTLY to the following schema:\n\n"
+        f"{tool_call_parser.get_format_instructions()}\n\n"
+
+        f"If there were no tool calls, output ONLY a JSON object (with no extra text) that adheres EXACTLY to the following schema:\n\n"
         f"{parser.get_format_instructions()}\n\n"
-        f"If the user's question doesn't require any tool, answer directly in plain text with no JSON."
     )
 
     return sys_msg
@@ -179,11 +177,16 @@ def prepare_tools(tools: Sequence[BaseTool]) -> list[ToolDefinition]:
     return tools_definitions
 
 
-def convert_llm_response(response: BaseMessage) -> List[BaseMessage]:
+def convert_llm_response(response: BaseMessage, parser: PydanticOutputParser = None, is_custom_parser: bool = False) -> List[BaseMessage]:
     """
     Convert LLM response to appropriate LangChain messages.
     If response contains tool calls (JSON), convert to AIMessage with tool_calls.
     Otherwise, return as AIMessage.
+    
+    Args:
+        response: The LLM response message
+        parser: The output parser to use
+        is_custom_parser: Whether the parser is a custom parser (True) or default parser (False)
     """
     converted_messages = []
 
@@ -193,27 +196,41 @@ def convert_llm_response(response: BaseMessage) -> List[BaseMessage]:
     else:
         content = str(response)
 
-    # Check if content contains JSON tool calls
     json_matches = re.findall(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", content, re.DOTALL)
 
     tool_calls = []
 
     if json_matches:
-        # Try to parse as tool calls
         for match in json_matches:
             try:
-                tool_call_data = json.loads(match)
-                tool_name = tool_call_data.get("tool")
-                tool_args = tool_call_data.get("args", {})
+                data = json.loads(match)
 
-                if tool_name:
-                    # Create tool call structure
-                    tool_call = {
-                        "name": tool_name,
-                        "args": tool_args,
-                        "id": f"{tool_name}_{hash(str(tool_args))}",
-                    }
-                    tool_calls.append(tool_call)
+                if data.get("tool"):
+                    # Try to parse as tool calls
+                    tool_name = data.get("tool")
+                    tool_args = data.get("args", {})
+
+                    if tool_name:
+                        # Create tool call structure
+                        tool_call = {
+                            "name": tool_name,
+                            "args": tool_args,
+                            "id": f"{tool_name}_{hash(str(tool_args))}",
+                        }
+                        tool_calls.append(tool_call)
+                else:
+                    # When no tool is being called, use the custom schema if it's passed and do not parse the response
+                    if is_custom_parser:
+                        content = match
+                    # Otherwise, use the default parser and parse the response
+                    else:
+                        try:
+                            parsed_response = parser.parse(match)
+                            content = parsed_response.response
+                        except Exception as e:
+                            # If parsing fails, keep the original content
+                            pass
+                    
             except json.JSONDecodeError:
                 # Skip invalid JSON
                 continue

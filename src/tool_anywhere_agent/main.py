@@ -4,6 +4,8 @@ from langchain_core.messages import (
     BaseMessage,
     SystemMessage,
 )
+from langchain_core.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, Field
 
 from langgraph.graph.message import add_messages
 from langgraph.graph import START, END, StateGraph
@@ -21,7 +23,6 @@ from .prompt_builder import (
 
 class AgentState(TypedDict):
     """The state of the agent."""
-
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
 
@@ -37,19 +38,30 @@ def _route_tools(
 
 
 def create_tool_anywhere_agent(
-    model: BaseLanguageModel, tools: Sequence[BaseTool] = None
+    model: BaseLanguageModel, tools: Sequence[BaseTool] = None, parser: PydanticOutputParser = None
 ):
     available_tools = prepare_tools(tools=tools)
+
+    class OutputSchema(BaseModel):
+        response: str = Field(..., description="Response to the user's question")
+
+    is_custom_parser = parser is not None
+    if parser is None:
+        simple_output_parser = PydanticOutputParser(pydantic_object=OutputSchema)
+    else:
+        simple_output_parser = parser
+
 
     def _call_model_node(state: AgentState):
         messages = state.get("messages", [])
 
         # Create system message with current conversation history to check for completed tool calls
-        system_message_content = create_system_message(tools=available_tools, messages=messages)
+        system_message_content = create_system_message(tools=available_tools, messages=messages, parser=simple_output_parser)
         system_msg = SystemMessage(content=system_message_content)
+
         response = model.invoke([system_msg] + messages)
 
-        converted_message = convert_llm_response(response)
+        converted_message = convert_llm_response(response, parser=simple_output_parser, is_custom_parser=is_custom_parser)
 
         return {"messages": converted_message}
 
