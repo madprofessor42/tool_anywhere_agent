@@ -154,7 +154,7 @@ def create_system_message(
         f"2. Do not try to solve problems manually if a tool exists for that purpose. "
         f"3. If tool calls do not depend on each other, you can call them in a sequence. "
         f"4. NEVER call the same tool with the same arguments if it has already been completed (see above). "
-        f"5. If the user's question doesn't require any tool, answer directly in plain text with no JSON and do not invoke a tool at all. "
+        f"5. If the user's question doesn't require any tool, answer directly and do not invoke a tool at all. "
         f"6. System role specified in the beginning is a must to follow. "
         f"7. Do not mention to user anything about tool calling, just answer the question.\n\n"
         f"If there were tool calls, output ONLY a JSON object (with no extra text) that adheres EXACTLY to the following schema:\n\n"
