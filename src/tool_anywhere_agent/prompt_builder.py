@@ -74,7 +74,8 @@ def get_completed_tool_calls(messages: Sequence[BaseMessage]) -> str:
 def create_system_message(
     tools: list[ToolDefinition] = None,
     messages: Sequence[BaseMessage] = None,
-    parser: PydanticOutputParser = None
+    parser: PydanticOutputParser = None,
+    custom_system_message: str = None,
 ) -> str:
     """
     Create a system message with tool instructions and JSON schema.
@@ -82,7 +83,8 @@ def create_system_message(
     Args:
         tools (ToolDefinition): List of available tools
         messages: List of conversation messages to check for completed tool calls
-
+        parser: Output parser to use
+        custom_system_message: Custom system message to use
     Returns:
         str: Formatted system message with JSON schema instructions
     """
@@ -90,7 +92,7 @@ def create_system_message(
     class ToolCall(BaseModel):
         tool: str = Field(..., description="Name of the tool to call")
         args: dict = Field(..., description="Arguments to pass to the tool")
-    
+
     tool_call_parser = PydanticOutputParser(pydantic_object=ToolCall)
 
     # Get completed tool calls information
@@ -137,26 +139,26 @@ def create_system_message(
                     f"- {arg_name} ({arg_type}, {required}{default_info})\n"
                 )
 
-    sys_msg = (
-        f"You are a tool calling agent. You have a list of tools and your task is to determine which tool to use.\n\n"
+    if custom_system_message is None:
+        custom_system_message = "You are a tool calling agent. You have a list of tools and your task is to determine which tool to use."
 
+    sys_msg = (
+        f"# System Role:\n"
+        f"{custom_system_message}\n\n"
         f"# List of available tools:\n"
         f"{tools_description}\n\n"
-        
         f"# Previously completed tool calls:\n"
         f"{completed_tools_info}"
-
         f"# Tool calling rules:\n"
         f"1. When a user's question matches a tool's capability, you MUST use that tool. "
         f"2. Do not try to solve problems manually if a tool exists for that purpose. "
-        f"3. You must use 1 tool at a time. "
+        f"3. If tool calls do not depend on each other, you can call them in a sequence. "
         f"4. NEVER call the same tool with the same arguments if it has already been completed (see above). "
         f"5. If the user's question doesn't require any tool, answer directly in plain text with no JSON and do not invoke a tool at all. "
-        f"6. Do not mention to user anything about tool calling, just answer the question.\n\n"
-        
+        f"6. System role specified in the beginning is a must to follow. "
+        f"7. Do not mention to user anything about tool calling, just answer the question.\n\n"
         f"If there were tool calls, output ONLY a JSON object (with no extra text) that adheres EXACTLY to the following schema:\n\n"
         f"{tool_call_parser.get_format_instructions()}\n\n"
-
         f"If there were no tool calls, output ONLY a JSON object (with no extra text) that adheres EXACTLY to the following schema:\n\n"
         f"{parser.get_format_instructions()}\n\n"
     )
