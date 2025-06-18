@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tool-anywhere-agent"
-version = "0.0.1"
+version = "0.0.2"
 description = "A LangGraph-based agent for tool calling capabilities"
 readme = "README.md"
 license = {file = "LICENSE"}

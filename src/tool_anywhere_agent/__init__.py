@@ -1,6 +1,6 @@
 """Tool Anywhere Agent - A LangGraph-based agent for tool calling capabilities."""
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 __author__ = "Mad Professor"
 
 from .main import create_tool_anywhere_agent, AgentState
