@@ -1,5 +1,6 @@
 from langchain.output_parsers import PydanticOutputParser
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, InjectedToolArg, InjectedToolCallId
+from langchain_core.tools.base import get_all_basemodel_annotations
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -7,7 +8,8 @@ from langchain_core.messages import (
 )
 
 from pydantic import BaseModel, Field
-from typing import Sequence, TypedDict, Any, List
+from typing import Sequence, TypedDict, Any, List, Union, Type, get_args, get_origin
+from typing_extensions import Annotated
 
 import re
 import json
@@ -17,6 +19,43 @@ class ToolDefinition(TypedDict):
     name: str
     description: str
     args: dict[str, Any]
+
+
+def _is_injection(type_arg: Any) -> bool:
+    """Check if a type argument is an injection type (InjectedToolArg, InjectedToolCallId, or their subclasses)."""
+    # Check if it's directly an instance of InjectedToolArg or InjectedToolCallId
+    if isinstance(type_arg, (InjectedToolArg, InjectedToolCallId)):
+        return True
+    
+    # Check if it's a class that is a subclass of InjectedToolArg or InjectedToolCallId
+    if isinstance(type_arg, type) and (
+        issubclass(type_arg, InjectedToolArg) or issubclass(type_arg, InjectedToolCallId)
+    ):
+        return True
+    
+    # Handle Union and Annotated types
+    origin_ = get_origin(type_arg)
+    if origin_ is Union or origin_ is Annotated:
+        return any(_is_injection(ta) for ta in get_args(type_arg))
+    
+    return False
+
+
+def _get_injected_args(tool: BaseTool) -> set[str]:
+    """Get the names of all arguments that are injected and should be filtered from the schema."""
+    full_schema = tool.get_input_schema()
+    injected_args = set()
+
+    for name, type_ in get_all_basemodel_annotations(full_schema).items():
+        injections = [
+            type_arg
+            for type_arg in get_args(type_)
+            if _is_injection(type_arg)
+        ]
+        if injections:
+            injected_args.add(name)
+    
+    return injected_args
 
 
 def get_completed_tool_calls(messages: Sequence[BaseMessage]) -> str:
@@ -138,7 +177,10 @@ def create_system_message(
                 tools_description += (
                     f"- {arg_name} ({arg_type}, {required}{default_info})\n"
                 )
-
+        else:
+            tools_description += "Arguments:\n"
+            tools_description += f"- No arguments\n"
+            
     if custom_system_message is None:
         custom_system_message = "You are a tool calling agent. You have a list of tools and your task is to determine which tool to use."
 
@@ -167,14 +209,33 @@ def create_system_message(
 
 
 def prepare_tools(tools: Sequence[BaseTool]) -> list[ToolDefinition]:
-    tools_definitions = [
-        {
+    """
+    Prepare tools for the prompt by filtering out injected arguments.
+    
+    Args:
+        tools: Sequence of BaseTool objects
+        
+    Returns:
+        List of ToolDefinition dicts with injected arguments filtered out
+    """
+    tools_definitions = []
+    
+    for tool in tools:
+        # Get the injected arguments that should be filtered out
+        injected_args = _get_injected_args(tool)
+        
+        # Filter out injected arguments from the tool args
+        filtered_args = {
+            arg_name: arg_info 
+            for arg_name, arg_info in tool.args.items()
+            if arg_name not in injected_args
+        }
+        
+        tools_definitions.append({
             "name": tool.name,
             "description": tool.description,
-            "args": tool.args,
-        }
-        for tool in tools
-    ]
+            "args": filtered_args,
+        })
 
     return tools_definitions
 
@@ -198,7 +259,10 @@ def convert_llm_response(response: BaseMessage, parser: PydanticOutputParser = N
     else:
         content = str(response)
 
-    json_matches = re.findall(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", content, re.DOTALL)
+    match = re.search(r'\{.*\}', content, re.DOTALL)
+    json_matches = [match.group(0)] if match else []
+
+    print ("match", match)
 
     tool_calls = []
 

@@ -3,6 +3,7 @@ from langchain_core.tools import BaseTool
 from langchain_core.messages import (
     BaseMessage,
     SystemMessage,
+    AIMessage,
 )
 from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
@@ -10,8 +11,9 @@ from pydantic import BaseModel, Field
 from langgraph.graph.message import add_messages
 from langgraph.graph import START, END, StateGraph
 from langgraph.prebuilt import ToolNode
+from langgraph.types import Send
 
-from typing import Sequence, TypedDict
+from typing import Sequence, TypedDict, Union
 from typing_extensions import Annotated
 
 from .prompt_builder import (
@@ -24,17 +26,6 @@ from .prompt_builder import (
 class AgentState(TypedDict):
     """The state of the agent."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
-
-
-def _route_tools(
-    state: AgentState,
-):
-    messages = state["messages"]
-    last_message = messages[-1]
-
-    if last_message.tool_calls:
-        return "tools"
-    return END
 
 
 def create_tool_anywhere_agent(
@@ -74,7 +65,25 @@ def create_tool_anywhere_agent(
 
         return {"messages": converted_message}
 
+    # Create ToolNode instance
     _execute_tools_node = ToolNode(tools)
+
+    def _route_tools(state: AgentState) -> Union[str, list[Send]]:
+        """Route to tools or end, with proper injection for tools that need state/tool_call_id"""
+        messages = state["messages"]
+        last_message = messages[-1]
+
+        if isinstance(last_message, AIMessage) and last_message.tool_calls:
+            # Inject state into tool calls (similar to create_react_agent)
+            tool_calls = [
+                _execute_tools_node.inject_tool_args(call, state, None)  # None for store
+                for call in last_message.tool_calls
+            ]
+
+            # Use Send API to pass individual tool calls
+            return [Send("tools_node", [tool_call]) for tool_call in tool_calls]
+        
+        return END
 
     graph = StateGraph(state_schema=AgentState)
 
@@ -85,7 +94,7 @@ def create_tool_anywhere_agent(
     graph.add_conditional_edges(
         "model_node",
         _route_tools,
-        {"tools": "tools_node", END: END},
+        # Remove the explicit path map since we're using Send API
     )
     # Any time a tool is called, we return to the chatbot to decide the next step
     graph.add_edge("tools_node", "model_node")
